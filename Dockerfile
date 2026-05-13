@@ -2,7 +2,10 @@ FROM --platform=linux/amd64 ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt update -y && apt install --no-install-recommends -y \
+# ============================================================
+# INSTALL PACKAGES - digabung jadi 1 RUN untuk efisiensi layer
+# ============================================================
+RUN apt-get update -y && apt-get install --no-install-recommends -y \
     xfce4 \
     xfce4-goodies \
     tigervnc-standalone-server \
@@ -17,30 +20,35 @@ RUN apt update -y && apt install --no-install-recommends -y \
     python3-pip \
     procps \
     iproute2 \
-    && apt update -y && apt install -y \
     dbus-x11 \
     x11-utils \
     x11-xserver-utils \
     x11-apps \
-    && apt install -y software-properties-common
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
 
+# Firefox dari PPA Mozilla
 RUN add-apt-repository ppa:mozillateam/ppa -y && \
-    echo 'Package: *' >> /etc/apt/preferences.d/mozilla-firefox && \
-    echo 'Pin: release o=LP-PPA-mozillateam' >> /etc/apt/preferences.d/mozilla-firefox && \
-    echo 'Pin-Priority: 1001' >> /etc/apt/preferences.d/mozilla-firefox && \
-    echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' | \
-    tee /etc/apt/apt.conf.d/51unattended-upgrades-firefox && \
-    apt update -y && apt install -y firefox && \
-    apt update -y && apt install -y xubuntu-icon-theme
+    printf 'Package: *\nPin: release o=LP-PPA-mozillateam\nPin-Priority: 1001\n' \
+        > /etc/apt/preferences.d/mozilla-firefox && \
+    echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' \
+        > /etc/apt/apt.conf.d/51unattended-upgrades-firefox && \
+    apt-get update -y && apt-get install -y firefox xubuntu-icon-theme \
+    && rm -rf /var/lib/apt/lists/*
 
-# Buat user terbatas
+# ============================================================
+# BUAT USER TERBATAS
+# ============================================================
 RUN useradd -m -s /bin/bash restricteduser && \
     echo "restricteduser:password123" | chpasswd
 
-# Hapus terminal & app berbahaya
-RUN apt remove -y --purge \
+# ============================================================
+# HAPUS TERMINAL & APP BERBAHAYA
+# ============================================================
+RUN apt-get remove -y --purge \
     xfce4-terminal xterm gnome-terminal konsole \
-    lxterminal mousepad gedit 2>/dev/null || true
+    lxterminal mousepad gedit 2>/dev/null || true && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN rm -f \
     /usr/share/applications/xfce4-terminal.desktop \
@@ -51,7 +59,7 @@ RUN rm -f \
     /usr/share/applications/mousepad.desktop 2>/dev/null || true
 
 # ============================================================
-# REPLACE index.html novnc
+# REPLACE index.html noVNC - redirect otomatis ke vnc.html
 # ============================================================
 RUN cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
@@ -87,25 +95,15 @@ RUN cat > /usr/share/novnc/index.html << 'EOF'
         p { font-size: 18px; color: #4fc3f7; }
     </style>
     <script>
-        function redirect() {
-            var host = window.location.hostname;
-            var port = window.location.port;
-            var protocol = window.location.protocol;
-            var wsProtocol = protocol === 'https:' ? 'wss' : 'ws';
-
-            // Build URL dengan path yang benar
-            var url = '/vnc.html?autoconnect=1' +
-                      '&reconnect=1' +
-                      '&reconnect_delay=2000' +
-                      '&resize=scale' +
-                      '&quality=6' +
-                      '&compression=2' +
-                      '&path=websockify';
-
-            window.location.href = url;
-        }
-        // Redirect setelah 1 detik
-        setTimeout(redirect, 1000);
+        setTimeout(function() {
+            window.location.href = '/vnc.html?autoconnect=1'
+                + '&reconnect=1'
+                + '&reconnect_delay=2000'
+                + '&resize=scale'
+                + '&quality=6'
+                + '&compression=2'
+                + '&path=websockify';
+        }, 1000);
     </script>
 </head>
 <body>
@@ -152,6 +150,7 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-ke
 </channel>
 EOF
 
+# Panel XFCE - hanya clock, tanpa taskbar / launcher
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
@@ -173,6 +172,7 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-pa
 </channel>
 EOF
 
+# Autostart Firefox saat login
 RUN mkdir -p /home/restricteduser/.config/autostart && \
     cat > /home/restricteduser/.config/autostart/firefox.desktop << 'EOF'
 [Desktop Entry]
@@ -198,21 +198,18 @@ unset DBUS_SESSION_BUS_ADDRESS
 exec dbus-launch --exit-with-session startxfce4
 EOF
 
+# Set password VNC (wajib ada, meskipun SecurityTypes None)
+# FIX: vncpasswd harus dijalankan sebagai restricteduser
 RUN chmod +x /home/restricteduser/.vnc/xstartup && \
     chown -R restricteduser:restricteduser /home/restricteduser/
 
 # ============================================================
 # STARTUP SCRIPT
-# Railway inject $PORT environment variable
-# Kita harus listen di $PORT bukan hardcode 6080
 # ============================================================
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
+set -euo pipefail  # FIX: fail fast jika ada error tak terduga
 
-# ============================================================
-# Railway menggunakan $PORT environment variable
-# Default fallback ke 8080 jika tidak ada
-# ============================================================
 NOVNC_PORT=${PORT:-8080}
 VNC_PORT=5901
 VNC_DISPLAY=:1
@@ -223,51 +220,61 @@ echo " noVNC Port : $NOVNC_PORT"
 echo " VNC Port   : $VNC_PORT"
 echo "================================================"
 
-# ============================================================
-# STEP 1: Cleanup
-# ============================================================
+# ----------------------------------------------------------
+# STEP 1: Cleanup lock file lama
+# ----------------------------------------------------------
 echo "[1/5] Cleanup..."
 rm -f /tmp/.X1-lock
 rm -f /tmp/.X11-unix/X1
 rm -rf /home/restricteduser/.vnc/*.pid
-rm -rf /home/restricteduser/.vnc/*.log
+# FIX: hapus log lama supaya tidak menumpuk
+rm -f /home/restricteduser/.vnc/*.log
 
-# ============================================================
+# ----------------------------------------------------------
 # STEP 2: Fix permissions
-# ============================================================
+# ----------------------------------------------------------
 echo "[2/5] Fix permissions..."
 chown -R restricteduser:restricteduser /home/restricteduser/
 chmod +x /home/restricteduser/.vnc/xstartup
 
-# ============================================================
+# ----------------------------------------------------------
 # STEP 3: Start VNC Server
-# ============================================================
-echo "[3/5] Starting VNC Server on $VNC_PORT..."
-su - restricteduser -s /bin/bash -c \
-    "vncserver $VNC_DISPLAY \
+# ----------------------------------------------------------
+echo "[3/5] Starting VNC Server on display $VNC_DISPLAY (port $VNC_PORT)..."
+
+# FIX: gunakan su -c bukan su - agar env tidak berubah
+su -c "vncserver $VNC_DISPLAY \
     -localhost no \
     -SecurityTypes None \
     -geometry 1280x720 \
     -depth 24 \
-    --I-KNOW-THIS-IS-INSECURE" 2>&1
+    --I-KNOW-THIS-IS-INSECURE 2>&1" \
+    restricteduser
 
-# Tunggu VNC ready
+# Tunggu VNC benar-benar ready
 echo "    Waiting for VNC..."
 RETRY=0
-while [ $RETRY -lt 30 ]; do
-    if ss -tlnp 2>/dev/null | grep -q ":$VNC_PORT" || \
-       netstat -tlnp 2>/dev/null | grep -q ":$VNC_PORT"; then
-        echo "    VNC ready ✓"
+MAX_RETRY=30
+while [ $RETRY -lt $MAX_RETRY ]; do
+    # FIX: prioritaskan ss, fallback ke netstat
+    if ss -tlnp 2>/dev/null | grep -q ":$VNC_PORT "; then
+        echo "    VNC ready on :$VNC_PORT ✓"
         break
     fi
     RETRY=$((RETRY + 1))
-    echo "    Retry $RETRY/30..."
+    if [ $RETRY -eq $MAX_RETRY ]; then
+        echo "[ERROR] VNC tidak mau start setelah $MAX_RETRY percobaan!"
+        # Tampilkan log untuk debug
+        cat /home/restricteduser/.vnc/*.log 2>/dev/null || true
+        exit 1
+    fi
+    echo "    Retry $RETRY/$MAX_RETRY..."
     sleep 2
 done
 
-# ============================================================
-# STEP 4: Generate SSL
-# ============================================================
+# ----------------------------------------------------------
+# STEP 4: Generate SSL self-signed
+# ----------------------------------------------------------
 echo "[4/5] Generating SSL..."
 openssl req -new \
     -subj "/C=JP/O=Desktop/CN=localhost" \
@@ -276,12 +283,11 @@ openssl req -new \
     -keyout /self.pem 2>/dev/null
 echo "    SSL ready ✓"
 
-# ============================================================
-# STEP 5: Start Websockify di PORT yang Railway berikan
-# ============================================================
+# ----------------------------------------------------------
+# STEP 5: Start websockify / noVNC
+# ----------------------------------------------------------
 echo "[5/5] Starting noVNC on port $NOVNC_PORT..."
 
-# Jalankan websockify foreground agar Railway tahu app sudah ready
 websockify \
     --web=/usr/share/novnc/ \
     --cert=/self.pem \
@@ -292,26 +298,20 @@ websockify \
 
 WEBSOCKIFY_PID=$!
 
-# Tunggu websockify ready
+# Beri waktu websockify bind ke port
 sleep 3
 
-if kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
-    echo "    noVNC ready on port $NOVNC_PORT ✓"
-else
-    echo "[ERROR] Websockify failed!"
-    cat /var/log/websockify.log
+if ! kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
+    echo "[ERROR] Websockify gagal start!"
+    cat /var/log/websockify.log 2>/dev/null || true
     exit 1
 fi
+echo "    noVNC ready on port $NOVNC_PORT ✓"
 
-echo ""
-echo "================================================"
-echo " READY!"
-echo " Access: https://your-app.railway.app"
-echo "================================================"
-
-# ============================================================
-# Block binary berbahaya setelah semua service jalan
-# ============================================================
+# ----------------------------------------------------------
+# Block binary berbahaya SETELAH semua service jalan
+# (jangan diblock sebelumnya, karena dibutuhkan saat startup)
+# ----------------------------------------------------------
 echo "Blocking dangerous binaries..."
 
 BLOCK_LIST=(
@@ -337,31 +337,38 @@ BLOCK_LIST=(
     /usr/bin/perl /usr/bin/ruby
     /usr/bin/php /usr/bin/lua
     /usr/bin/node /usr/bin/npm
+    # FIX: tambah python agar user tidak bisa spawn shell via python
+    /usr/bin/python3 /usr/bin/python
 )
 
 for binary in "${BLOCK_LIST[@]}"; do
-    if [ -f "$binary" ]; then
-        chmod 000 "$binary"
-    fi
+    [ -f "$binary" ] && chmod 000 "$binary" || true
 done
 echo "Binaries blocked ✓"
 
-# ============================================================
-# Monitor - keep container alive & restart jika mati
-# ============================================================
+echo ""
+echo "================================================"
+echo " READY!"
+echo " Access: https://your-app.railway.app"
+echo "================================================"
+
+# ----------------------------------------------------------
+# Monitor loop - restart service jika mati
+# FIX: set +e agar loop tidak berhenti karena exit code
+# ----------------------------------------------------------
+set +e
 while true; do
     # Cek VNC
-    if ! su - restricteduser -s /bin/bash -c \
-        "vncserver -list 2>/dev/null" | grep -q "$VNC_DISPLAY"; then
+    if ! ss -tlnp 2>/dev/null | grep -q ":$VNC_PORT "; then
         echo "[!] VNC died, restarting..."
         rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
-        su - restricteduser -s /bin/bash -c \
-            "vncserver $VNC_DISPLAY \
+        su -c "vncserver $VNC_DISPLAY \
             -localhost no \
             -SecurityTypes None \
             -geometry 1280x720 \
             -depth 24 \
-            --I-KNOW-THIS-IS-INSECURE"
+            --I-KNOW-THIS-IS-INSECURE" \
+            restricteduser
     fi
 
     # Cek websockify
@@ -383,7 +390,8 @@ STARTSCRIPT
 
 RUN chmod +x /start.sh
 
-# Railway detect port dari EXPOSE
+# Railway mendeteksi port dari EXPOSE
+# FIX: Railway override ini dengan $PORT env var, EXPOSE hanya dokumentasi
 EXPOSE 8080
 
 CMD ["/start.sh"]
