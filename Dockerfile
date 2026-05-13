@@ -21,6 +21,7 @@ RUN apt update -y && apt install --no-install-recommends -y \
     git \
     tzdata \
     openssl \
+    nginx \
     && apt update -y && apt install -y \
     dbus-x11 \
     x11-utils \
@@ -44,7 +45,7 @@ RUN useradd -m -s /usr/sbin/nologin restricteduser && \
     echo "restricteduser:password123" | chpasswd
 
 # ============================================================
-# HAPUS TERMINAL & APLIKASI BERBAHAYA (saat build masih pakai sh)
+# HAPUS TERMINAL & APLIKASI BERBAHAYA
 # ============================================================
 RUN apt remove -y --purge \
     xfce4-terminal \
@@ -65,6 +66,43 @@ RUN rm -f \
     /usr/share/applications/mousepad.desktop \
     /usr/share/applications/vim.desktop \
     /usr/share/applications/nano.desktop 2>/dev/null || true
+
+# ============================================================
+# KONFIGURASI NGINX - REDIRECT KE VNC
+# ============================================================
+RUN cat > /etc/nginx/sites-available/default << 'EOF'
+server {
+    listen 6080 default_server;
+    listen [::]:6080 default_server;
+
+    root /usr/share/novnc;
+    index vnc.html;
+
+    # Redirect root ke vnc.html
+    location = / {
+        return 301 /vnc.html;
+    }
+
+    # Redirect semua path tidak dikenal ke vnc.html
+    location / {
+        try_files $uri $uri/ /vnc.html;
+    }
+
+    # Blokir directory listing
+    autoindex off;
+
+    # Proxy WebSocket ke VNC
+    location /websockify {
+        proxy_pass http://127.0.0.1:5901;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
+EOF
 
 # ============================================================
 # KONFIGURASI XFCE UNTUK restricteduser
@@ -116,7 +154,7 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xm
 </channel>
 EOF
 
-# Panel XFCE minimal (hanya clock, tanpa launcher)
+# Panel XFCE minimal
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
@@ -154,16 +192,13 @@ EOF
 RUN chown -R restricteduser:restricteduser /home/restricteduser/
 
 # ============================================================
-# BUAT STARTUP SCRIPT
-# Blokir shell & command berbahaya dilakukan di SINI (runtime)
-# bukan saat build, agar Docker build tidak error
+# STARTUP SCRIPT
 # ============================================================
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
 
 echo "[*] Mengunci binary berbahaya..."
 
-# Daftar binary yang akan diblokir
 BLOCK_LIST=(
     /bin/bash
     /bin/sh
@@ -301,20 +336,29 @@ echo "[*] Menjalankan VNC server..."
 su restricteduser -s /bin/bash -c \
     "vncserver :1 -localhost no -SecurityTypes None -geometry 1024x768 --I-KNOW-THIS-IS-INSECURE"
 
-# Generate SSL
-echo "[*] Generate SSL certificate..."
-openssl req -new -subj "/C=JP" -x509 -days 365 -nodes \
-    -out /self.pem -keyout /self.pem 2>/dev/null
+# ============================================================
+# JALANKAN NGINX SEBAGAI REVERSE PROXY + REDIRECT
+# ============================================================
+echo "[*] Menjalankan Nginx..."
+nginx -t && nginx
 
-# Jalankan websockify
-echo "[*] Menjalankan noVNC websockify..."
+# ============================================================
+# JALANKAN WEBSOCKIFY di port internal (5902)
+# Nginx akan proxy websocket dari 6080/websockify ke sini
+# ============================================================
+echo "[*] Menjalankan websockify internal..."
 websockify -D \
     --web=/usr/share/novnc/ \
-    --cert=/self.pem \
-    6080 localhost:5901
+    127.0.0.1:5902 \
+    127.0.0.1:5901
+
+# Update nginx config untuk websockify ke port 5902
+sed -i 's/127.0.0.1:5901/127.0.0.1:5902/' /etc/nginx/sites-available/default
+nginx -s reload
 
 echo "[*] Semua service berjalan!"
 echo "[*] Akses via browser: http://localhost:6080"
+echo "[*] Akan otomatis redirect ke VNC"
 
 tail -f /dev/null
 STARTSCRIPT
