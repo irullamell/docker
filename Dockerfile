@@ -36,14 +36,17 @@ RUN apt-get update -y && apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================
-# INSTALL FIREFOX - download tarball langsung dari Mozilla
-# Menghindari masalah gpg-agent yang tidak tersedia di Docker
+# INSTALL FIREFOX - wget dengan -L untuk follow redirect
+# URL download.mozilla.org melakukan redirect ke CDN,
+# tanpa -L wget hanya download HTML redirect bukan file asli
 # ============================================================
-RUN wget -q "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US" \
-        -O /tmp/firefox.tar.bz2 && \
-    tar -xjf /tmp/firefox.tar.bz2 -C /opt/ && \
-    ln -sf /opt/firefox/firefox /usr/local/bin/firefox && \
-    rm /tmp/firefox.tar.bz2
+RUN wget -qL \
+        "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US" \
+        -O /tmp/firefox.tar.bz2 \
+    && file /tmp/firefox.tar.bz2 \
+    && tar -xjf /tmp/firefox.tar.bz2 -C /opt/ \
+    && ln -sf /opt/firefox/firefox /usr/local/bin/firefox \
+    && rm /tmp/firefox.tar.bz2
 
 # ============================================================
 # BUAT USER TERBATAS
@@ -224,25 +227,16 @@ echo " noVNC Port : $NOVNC_PORT"
 echo " VNC Port   : $VNC_PORT"
 echo "================================================"
 
-# ----------------------------------------------------------
-# STEP 1: Cleanup
-# ----------------------------------------------------------
 echo "[1/5] Cleanup..."
 rm -f /tmp/.X1-lock
 rm -f /tmp/.X11-unix/X1
 rm -f /home/restricteduser/.vnc/*.pid
 rm -f /home/restricteduser/.vnc/*.log
 
-# ----------------------------------------------------------
-# STEP 2: Fix permissions
-# ----------------------------------------------------------
 echo "[2/5] Fix permissions..."
 chown -R restricteduser:restricteduser /home/restricteduser/
 chmod +x /home/restricteduser/.vnc/xstartup
 
-# ----------------------------------------------------------
-# STEP 3: Start VNC Server
-# ----------------------------------------------------------
 echo "[3/5] Starting VNC Server on display $VNC_DISPLAY..."
 su -c "vncserver $VNC_DISPLAY \
     -localhost no \
@@ -252,7 +246,6 @@ su -c "vncserver $VNC_DISPLAY \
     --I-KNOW-THIS-IS-INSECURE 2>&1" \
     restricteduser
 
-# Tunggu VNC ready
 echo "    Waiting for VNC..."
 RETRY=0
 MAX_RETRY=30
@@ -271,9 +264,6 @@ while [ $RETRY -lt $MAX_RETRY ]; do
     sleep 2
 done
 
-# ----------------------------------------------------------
-# STEP 4: Generate SSL
-# ----------------------------------------------------------
 echo "[4/5] Generating SSL..."
 openssl req -new \
     -subj "/C=JP/O=Desktop/CN=localhost" \
@@ -282,9 +272,6 @@ openssl req -new \
     -keyout /self.pem 2>/dev/null
 echo "    SSL ready ✓"
 
-# ----------------------------------------------------------
-# STEP 5: Start noVNC/websockify
-# ----------------------------------------------------------
 echo "[5/5] Starting noVNC on port $NOVNC_PORT..."
 websockify \
     --web=/usr/share/novnc/ \
@@ -304,10 +291,6 @@ if ! kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
 fi
 echo "    noVNC ready on port $NOVNC_PORT ✓"
 
-# ----------------------------------------------------------
-# Block binary berbahaya setelah semua service jalan
-# wget & bzip2 diblock di sini (dibutuhkan saat build)
-# ----------------------------------------------------------
 echo "Blocking dangerous binaries..."
 BLOCK_LIST=(
     /usr/bin/xterm /usr/bin/xfce4-terminal
@@ -334,7 +317,6 @@ BLOCK_LIST=(
     /usr/bin/node /usr/bin/npm
     /usr/bin/python3 /usr/bin/python
 )
-
 for binary in "${BLOCK_LIST[@]}"; do
     [ -f "$binary" ] && chmod 000 "$binary" || true
 done
@@ -345,9 +327,6 @@ echo "================================================"
 echo " READY! Access: https://your-app.railway.app"
 echo "================================================"
 
-# ----------------------------------------------------------
-# Monitor loop
-# ----------------------------------------------------------
 while true; do
     if ! ss -tlnp 2>/dev/null | grep -q ":$VNC_PORT "; then
         echo "[!] VNC died, restarting..."
