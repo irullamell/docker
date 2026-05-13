@@ -2,7 +2,6 @@ FROM --platform=linux/amd64 ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install semua package yang diperlukan
 RUN apt update -y && apt install --no-install-recommends -y \
     xfce4 \
     xfce4-goodies \
@@ -10,18 +9,13 @@ RUN apt update -y && apt install --no-install-recommends -y \
     novnc \
     websockify \
     sudo \
-    xterm \
     init \
-    systemd \
-    snapd \
-    vim \
     net-tools \
-    curl \
-    wget \
-    git \
     tzdata \
     openssl \
-    nginx \
+    python3 \
+    python3-pip \
+    procps \
     && apt update -y && apt install -y \
     dbus-x11 \
     x11-utils \
@@ -29,32 +23,23 @@ RUN apt update -y && apt install --no-install-recommends -y \
     x11-apps \
     && apt install -y software-properties-common
 
-# Install Firefox dari PPA Mozilla
 RUN add-apt-repository ppa:mozillateam/ppa -y && \
     echo 'Package: *' >> /etc/apt/preferences.d/mozilla-firefox && \
     echo 'Pin: release o=LP-PPA-mozillateam' >> /etc/apt/preferences.d/mozilla-firefox && \
     echo 'Pin-Priority: 1001' >> /etc/apt/preferences.d/mozilla-firefox && \
-    echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' | tee /etc/apt/apt.conf.d/51unattended-upgrades-firefox && \
+    echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' | \
+    tee /etc/apt/apt.conf.d/51unattended-upgrades-firefox && \
     apt update -y && apt install -y firefox && \
     apt update -y && apt install -y xubuntu-icon-theme
 
-# ============================================================
-# BUAT USER TERBATAS
-# ============================================================
-RUN useradd -m -s /usr/sbin/nologin restricteduser && \
+# Buat user terbatas
+RUN useradd -m -s /bin/bash restricteduser && \
     echo "restricteduser:password123" | chpasswd
 
-# ============================================================
-# HAPUS TERMINAL & APLIKASI BERBAHAYA
-# ============================================================
+# Hapus terminal & app berbahaya
 RUN apt remove -y --purge \
-    xfce4-terminal \
-    xterm \
-    gnome-terminal \
-    konsole \
-    lxterminal \
-    mousepad \
-    gedit 2>/dev/null || true
+    xfce4-terminal xterm gnome-terminal konsole \
+    lxterminal mousepad gedit 2>/dev/null || true
 
 RUN rm -f \
     /usr/share/applications/xfce4-terminal.desktop \
@@ -62,54 +47,66 @@ RUN rm -f \
     /usr/share/applications/exo-terminal-emulator.desktop \
     /usr/share/applications/xfce4-appfinder.desktop \
     /usr/share/applications/thunar.desktop \
-    /usr/share/applications/thunar-bulk-rename.desktop \
-    /usr/share/applications/mousepad.desktop \
-    /usr/share/applications/vim.desktop \
-    /usr/share/applications/nano.desktop 2>/dev/null || true
+    /usr/share/applications/mousepad.desktop 2>/dev/null || true
 
 # ============================================================
-# KONFIGURASI NGINX - REDIRECT KE VNC
+# REPLACE index.html novnc - auto redirect + auto connect
 # ============================================================
-RUN cat > /etc/nginx/sites-available/default << 'EOF'
-server {
-    listen 6080 default_server;
-    listen [::]:6080 default_server;
-
-    root /usr/share/novnc;
-    index vnc.html;
-
-    # Redirect root ke vnc.html
-    location = / {
-        return 301 /vnc.html;
-    }
-
-    # Redirect semua path tidak dikenal ke vnc.html
-    location / {
-        try_files $uri $uri/ /vnc.html;
-    }
-
-    # Blokir directory listing
-    autoindex off;
-
-    # Proxy WebSocket ke VNC
-    location /websockify {
-        proxy_pass http://127.0.0.1:5901;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
-        proxy_send_timeout 86400;
-    }
-}
+RUN cat > /usr/share/novnc/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Loading VNC...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        .loader {
+            text-align: center;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #333;
+            border-top: 5px solid #4fc3f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <script>
+        // Redirect paksa ke vnc.html dengan autoconnect
+        window.onload = function() {
+            window.location.href = '/vnc.html?autoconnect=1&reconnect=1&reconnect_delay=2000&resize=scale&quality=6&compression=2&show_dot=false&path=websockify';
+        };
+    </script>
+</head>
+<body>
+    <div class="loader">
+        <div class="spinner"></div>
+        <p>Connecting to Desktop...</p>
+    </div>
+</body>
+</html>
 EOF
 
 # ============================================================
-# KONFIGURASI XFCE UNTUK restricteduser
+# KONFIGURASI XFCE
 # ============================================================
 RUN mkdir -p /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml
 
-# Nonaktifkan desktop right-click menu
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-desktop" version="1.0">
@@ -122,7 +119,6 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-de
 </channel>
 EOF
 
-# Nonaktifkan semua keyboard shortcut XFCE
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-keyboard-shortcuts" version="1.0">
@@ -143,18 +139,6 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-ke
 </channel>
 EOF
 
-# Nonaktifkan fitur window manager berbahaya
-RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="easy_click" type="string" value="None"/>
-    <property name="mousewheel_rollup" type="bool" value="false"/>
-  </property>
-</channel>
-EOF
-
-# Panel XFCE minimal
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
@@ -176,60 +160,131 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-pa
 </channel>
 EOF
 
-# Autostart hanya Firefox
 RUN mkdir -p /home/restricteduser/.config/autostart && \
     cat > /home/restricteduser/.config/autostart/firefox.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
 Name=Firefox
-Exec=firefox --no-first-run --disable-restore-session-state
+Exec=firefox --no-first-run
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-# Fix ownership
 RUN chown -R restricteduser:restricteduser /home/restricteduser/
+
+# ============================================================
+# VNC xstartup
+# ============================================================
+RUN mkdir -p /home/restricteduser/.vnc && \
+    cat > /home/restricteduser/.vnc/xstartup << 'EOF'
+#!/bin/bash
+export XDG_SESSION_TYPE=x11
+export XDG_CURRENT_DESKTOP=XFCE
+export HOME=/home/restricteduser
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+exec dbus-launch --exit-with-session startxfce4
+EOF
+
+RUN chmod +x /home/restricteduser/.vnc/xstartup && \
+    chown -R restricteduser:restricteduser /home/restricteduser/
 
 # ============================================================
 # STARTUP SCRIPT
 # ============================================================
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
+set -e
 
-echo "[*] Mengunci binary berbahaya..."
+echo "================================================"
+echo " Starting Desktop Environment"
+echo "================================================"
+
+# ============================================================
+# STEP 1: Cleanup VNC lock files lama
+# ============================================================
+echo "[1/6] Cleanup lock files..."
+rm -f /tmp/.X1-lock
+rm -f /tmp/.X11-unix/X1
+rm -rf /home/restricteduser/.vnc/*.pid
+rm -rf /home/restricteduser/.vnc/*.log
+
+# ============================================================
+# STEP 2: Fix permissions
+# ============================================================
+echo "[2/6] Fix permissions..."
+chown -R restricteduser:restricteduser /home/restricteduser/
+chmod 700 /home/restricteduser/.vnc
+chmod 600 /home/restricteduser/.vnc/xstartup 2>/dev/null || true
+chmod +x /home/restricteduser/.vnc/xstartup
+
+# ============================================================
+# STEP 3: Start VNC Server
+# ============================================================
+echo "[3/6] Starting VNC Server..."
+su - restricteduser -s /bin/bash -c \
+    "vncserver :1 \
+    -localhost no \
+    -SecurityTypes None \
+    -geometry 1280x720 \
+    -depth 24 \
+    --I-KNOW-THIS-IS-INSECURE \
+    2>&1"
+
+# Tunggu VNC benar-benar ready
+echo "    Waiting for VNC to be ready..."
+for i in $(seq 1 30); do
+    if ss -tlnp | grep -q ':5901'; then
+        echo "    VNC ready on port 5901 ✓"
+        break
+    fi
+    echo "    Waiting... ($i/30)"
+    sleep 1
+done
+
+# ============================================================
+# STEP 4: Generate SSL Certificate
+# ============================================================
+echo "[4/6] Generating SSL certificate..."
+openssl req -new \
+    -subj "/C=JP/O=Desktop/CN=localhost" \
+    -x509 -days 365 -nodes \
+    -out /self.pem \
+    -keyout /self.pem 2>/dev/null
+echo "    SSL certificate generated ✓"
+
+# ============================================================
+# STEP 5: Start Websockify
+# ============================================================
+echo "[5/6] Starting websockify (noVNC)..."
+websockify \
+    --web=/usr/share/novnc/ \
+    --cert=/self.pem \
+    --ssl-only=false \
+    --log-file=/var/log/websockify.log \
+    0.0.0.0:6080 \
+    localhost:5901 &
+
+WEBSOCKIFY_PID=$!
+echo "    Websockify PID: $WEBSOCKIFY_PID"
+
+# Tunggu websockify ready
+sleep 3
+if kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
+    echo "    Websockify ready on port 6080 ✓"
+else
+    echo "    [ERROR] Websockify failed! Check log:"
+    cat /var/log/websockify.log
+    exit 1
+fi
+
+# ============================================================
+# STEP 6: Blokir binary berbahaya
+# ============================================================
+echo "[6/6] Blocking dangerous binaries..."
 
 BLOCK_LIST=(
-    /bin/bash
-    /bin/sh
-    /bin/dash
-    /bin/rbash
-    /usr/bin/bash
-    /usr/bin/sh
-    /usr/bin/dash
-    /usr/bin/zsh
-    /usr/bin/fish
-    /usr/bin/ksh
-    /usr/bin/tcsh
-    /usr/bin/csh
-    /usr/bin/perl
-    /usr/bin/python3
-    /usr/bin/python3.10
-    /usr/bin/python
-    /usr/bin/ruby
-    /usr/bin/php
-    /usr/bin/lua
-    /usr/bin/node
-    /usr/bin/nodejs
-    /usr/bin/npm
-    /usr/bin/pip
-    /usr/bin/pip3
-    /usr/bin/vim
-    /usr/bin/vi
-    /usr/bin/nano
-    /usr/bin/emacs
-    /usr/bin/mousepad
-    /usr/bin/gedit
     /usr/bin/xterm
     /usr/bin/xfce4-terminal
     /usr/bin/gnome-terminal
@@ -238,16 +293,20 @@ BLOCK_LIST=(
     /usr/bin/thunar
     /usr/bin/nautilus
     /usr/bin/pcmanfm
+    /usr/bin/mousepad
+    /usr/bin/gedit
+    /usr/bin/vim
+    /usr/bin/vi
+    /usr/bin/nano
+    /usr/bin/emacs
     /usr/bin/wget
     /usr/bin/curl
     /usr/bin/git
     /usr/bin/ssh
     /usr/bin/scp
-    /usr/bin/sftp
     /usr/bin/ftp
     /usr/bin/telnet
     /usr/bin/nc
-    /usr/bin/netcat
     /usr/bin/nmap
     /usr/bin/apt
     /usr/bin/apt-get
@@ -258,109 +317,73 @@ BLOCK_LIST=(
     /usr/bin/passwd
     /usr/bin/useradd
     /usr/bin/usermod
-    /usr/bin/userdel
-    /usr/bin/chsh
-    /usr/bin/chpasswd
     /usr/bin/adduser
-    /usr/bin/deluser
     /usr/bin/visudo
     /usr/bin/crontab
-    /usr/bin/at
-    /usr/bin/chmod
-    /usr/bin/chown
-    /usr/bin/chroot
-    /usr/bin/mount
-    /usr/bin/dd
-    /usr/bin/mkfs
-    /usr/bin/fdisk
-    /usr/bin/kill
-    /usr/bin/killall
-    /usr/bin/pkill
     /usr/bin/top
     /usr/bin/htop
     /usr/bin/strace
-    /usr/bin/ltrace
-    /usr/bin/gdb
     /usr/bin/find
-    /usr/bin/locate
     /usr/bin/base64
     /usr/bin/xxd
-    /usr/bin/hexdump
-    /usr/bin/strings
     /usr/bin/zip
     /usr/bin/unzip
     /usr/bin/tar
-    /usr/bin/gzip
-    /usr/bin/xz
     /usr/bin/rsync
     /usr/bin/nmcli
-    /usr/bin/ifconfig
-    /usr/sbin/useradd
-    /usr/sbin/usermod
-    /usr/sbin/userdel
-    /usr/sbin/chpasswd
-    /usr/sbin/visudo
-    /sbin/mount
-    /sbin/fdisk
+    /usr/bin/perl
+    /usr/bin/ruby
+    /usr/bin/php
+    /usr/bin/lua
+    /usr/bin/node
+    /usr/bin/npm
 )
 
+BLOCKED=0
 for binary in "${BLOCK_LIST[@]}"; do
     if [ -f "$binary" ]; then
         chmod 000 "$binary"
-        echo "  [BLOCKED] $binary"
+        BLOCKED=$((BLOCKED + 1))
     fi
 done
-
-echo "[*] Binary berbahaya berhasil dikunci"
-
-# ============================================================
-# Setup VNC untuk restricteduser
-# ============================================================
-echo "[*] Setup VNC..."
-mkdir -p /home/restricteduser/.vnc
-
-cat > /home/restricteduser/.vnc/xstartup << 'XSTARTUP'
-#!/bin/bash
-export XDG_SESSION_TYPE=x11
-export XDG_CURRENT_DESKTOP=XFCE
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-exec startxfce4
-XSTARTUP
-
-chmod +x /home/restricteduser/.vnc/xstartup
-chown -R restricteduser:restricteduser /home/restricteduser/
-
-# Jalankan VNC sebagai restricteduser
-echo "[*] Menjalankan VNC server..."
-su restricteduser -s /bin/bash -c \
-    "vncserver :1 -localhost no -SecurityTypes None -geometry 1024x768 --I-KNOW-THIS-IS-INSECURE"
+echo "    Blocked $BLOCKED binaries ✓"
 
 # ============================================================
-# JALANKAN NGINX SEBAGAI REVERSE PROXY + REDIRECT
+# DONE
 # ============================================================
-echo "[*] Menjalankan Nginx..."
-nginx -t && nginx
+echo ""
+echo "================================================"
+echo " Desktop Environment Ready!"
+echo " Access: http://localhost:6080"
+echo " VNC akan auto-connect"
+echo "================================================"
+echo ""
 
-# ============================================================
-# JALANKAN WEBSOCKIFY di port internal (5902)
-# Nginx akan proxy websocket dari 6080/websockify ke sini
-# ============================================================
-echo "[*] Menjalankan websockify internal..."
-websockify -D \
-    --web=/usr/share/novnc/ \
-    127.0.0.1:5902 \
-    127.0.0.1:5901
+# Monitor processes
+while true; do
+    # Cek VNC masih jalan
+    if ! su - restricteduser -s /bin/bash -c "vncserver -list 2>/dev/null" | grep -q ":1"; then
+        echo "[!] VNC died, restarting..."
+        rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+        su - restricteduser -s /bin/bash -c \
+            "vncserver :1 -localhost no -SecurityTypes None -geometry 1280x720 -depth 24 --I-KNOW-THIS-IS-INSECURE"
+    fi
 
-# Update nginx config untuk websockify ke port 5902
-sed -i 's/127.0.0.1:5901/127.0.0.1:5902/' /etc/nginx/sites-available/default
-nginx -s reload
+    # Cek websockify masih jalan
+    if ! kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
+        echo "[!] Websockify died, restarting..."
+        websockify \
+            --web=/usr/share/novnc/ \
+            --cert=/self.pem \
+            --ssl-only=false \
+            --log-file=/var/log/websockify.log \
+            0.0.0.0:6080 \
+            localhost:5901 &
+        WEBSOCKIFY_PID=$!
+    fi
 
-echo "[*] Semua service berjalan!"
-echo "[*] Akses via browser: http://localhost:6080"
-echo "[*] Akan otomatis redirect ke VNC"
-
-tail -f /dev/null
+    sleep 10
+done
 STARTSCRIPT
 
 RUN chmod +x /start.sh
