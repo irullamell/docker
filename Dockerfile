@@ -36,14 +36,14 @@ RUN apt-get update -y && apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================
-# INSTALL FIREFOX - wget dengan -L untuk follow redirect
-# URL download.mozilla.org melakukan redirect ke CDN,
-# tanpa -L wget hanya download HTML redirect bukan file asli
+# INSTALL FIREFOX
+# Pakai URL langsung ke releases Mozilla (tidak redirect)
+# Format: https://releases.mozilla.org/pub/firefox/releases/VERSION/linux-x86_64/en-US/
 # ============================================================
-RUN wget -qL \
-        "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US" \
-        -O /tmp/firefox.tar.bz2 \
-    && file /tmp/firefox.tar.bz2 \
+ARG FIREFOX_VERSION=126.0
+RUN wget -q \
+    "https://releases.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.bz2" \
+    -O /tmp/firefox.tar.bz2 \
     && tar -xjf /tmp/firefox.tar.bz2 -C /opt/ \
     && ln -sf /opt/firefox/firefox /usr/local/bin/firefox \
     && rm /tmp/firefox.tar.bz2
