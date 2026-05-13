@@ -29,185 +29,45 @@ RUN apt update -y && apt install --no-install-recommends -y \
     && apt install -y software-properties-common
 
 # Install Firefox dari PPA Mozilla
-RUN add-apt-repository ppa:mozillateam/ppa -y
-RUN echo 'Package: *' >> /etc/apt/preferences.d/mozilla-firefox
-RUN echo 'Pin: release o=LP-PPA-mozillateam' >> /etc/apt/preferences.d/mozilla-firefox
-RUN echo 'Pin-Priority: 1001' >> /etc/apt/preferences.d/mozilla-firefox
-RUN echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' | tee /etc/apt/apt.conf.d/51unattended-upgrades-firefox
-RUN apt update -y && apt install -y firefox
-RUN apt update -y && apt install -y xubuntu-icon-theme
+RUN add-apt-repository ppa:mozillateam/ppa -y && \
+    echo 'Package: *' >> /etc/apt/preferences.d/mozilla-firefox && \
+    echo 'Pin: release o=LP-PPA-mozillateam' >> /etc/apt/preferences.d/mozilla-firefox && \
+    echo 'Pin-Priority: 1001' >> /etc/apt/preferences.d/mozilla-firefox && \
+    echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:jammy";' | tee /etc/apt/apt.conf.d/51unattended-upgrades-firefox && \
+    apt update -y && apt install -y firefox && \
+    apt update -y && apt install -y xubuntu-icon-theme
 
 # ============================================================
-# BUAT USER TERBATAS (bukan root)
+# BUAT USER TERBATAS
 # ============================================================
 RUN useradd -m -s /usr/sbin/nologin restricteduser && \
     echo "restricteduser:password123" | chpasswd
 
 # ============================================================
-# BLOKIR SEMUA TERMINAL & SHELL
+# HAPUS TERMINAL & APLIKASI BERBAHAYA (saat build masih pakai sh)
 # ============================================================
-
-# Hapus atau blokir semua emulator terminal dari XFCE
-RUN apt remove -y xfce4-terminal xterm gnome-terminal konsole lxterminal \
-    rxvt rxvt-unicode aterm eterm 2>/dev/null || true
-
-# Ganti shell dengan nologin agar tidak bisa login shell
-RUN chsh -s /usr/sbin/nologin restricteduser
-
-# Blokir binary shell dan terminal dengan chmod 000
-RUN chmod 000 /bin/bash || true
-RUN chmod 000 /bin/sh || true
-RUN chmod 000 /bin/dash || true
-RUN chmod 000 /usr/bin/bash || true
-RUN chmod 000 /usr/bin/sh || true
-RUN chmod 000 /usr/bin/zsh || true
-RUN chmod 000 /usr/bin/fish || true
-RUN chmod 000 /usr/bin/ksh || true
-RUN chmod 000 /usr/bin/tcsh || true
-RUN chmod 000 /usr/bin/csh || true
-
-# Blokir command berbahaya / terminal apps
-RUN for cmd in \
-    xterm \
+RUN apt remove -y --purge \
     xfce4-terminal \
+    xterm \
     gnome-terminal \
     konsole \
     lxterminal \
-    xfrun4 \
-    xfce4-appfinder \
-    vim \
-    vi \
-    nano \
-    emacs \
-    gedit \
     mousepad \
-    leafpad \
-    kate \
-    su \
-    sudo \
-    passwd \
-    useradd \
-    usermod \
-    userdel \
-    chsh \
-    chpasswd \
-    adduser \
-    deluser \
-    visudo \
-    crontab \
-    at \
-    wget \
-    curl \
-    git \
-    ssh \
-    scp \
-    sftp \
-    ftp \
-    telnet \
-    nc \
-    netcat \
-    nmap \
-    python3 \
-    python \
-    perl \
-    ruby \
-    php \
-    lua \
-    node \
-    npm \
-    pip \
-    pip3 \
-    apt \
-    apt-get \
-    dpkg \
-    snap \
-    flatpak \
-    chmod \
-    chown \
-    chroot \
-    mount \
-    umount \
-    dd \
-    mkfs \
-    fdisk \
-    parted \
-    kill \
-    killall \
-    pkill \
-    ps \
-    top \
-    htop \
-    id \
-    whoami \
-    env \
-    printenv \
-    strace \
-    ltrace \
-    gdb \
-    objdump \
-    strings \
-    hexdump \
-    xxd \
-    base64 \
-    find \
-    locate \
-    updatedb \
-    xdg-open \
-    xdg-user-dirs \
-    dbus-launch \
-    dbus-send \
-    gdbus \
-    gio \
-    gvfs-open \
-    nautilus \
-    thunar \
-    pcmanfm \
-    nemo \
-    zip \
-    unzip \
-    tar \
-    gzip \
-    gunzip \
-    bzip2 \
-    bunzip2 \
-    xz \
-    7z \
-    rar \
-    unrar \
-    rsync \
-    smbclient \
-    nmcli \
-    ifconfig \
-    ip \
-    route \
-    iptables \
-    ufw \
-    firejail \
-    ; do \
-    path=$(which $cmd 2>/dev/null); \
-    if [ -n "$path" ]; then chmod 000 "$path"; fi; \
-    done
+    gedit 2>/dev/null || true
+
+RUN rm -f \
+    /usr/share/applications/xfce4-terminal.desktop \
+    /usr/share/applications/xterm.desktop \
+    /usr/share/applications/exo-terminal-emulator.desktop \
+    /usr/share/applications/xfce4-appfinder.desktop \
+    /usr/share/applications/thunar.desktop \
+    /usr/share/applications/thunar-bulk-rename.desktop \
+    /usr/share/applications/mousepad.desktop \
+    /usr/share/applications/vim.desktop \
+    /usr/share/applications/nano.desktop 2>/dev/null || true
 
 # ============================================================
-# KUNCI FILE MANAGER DAN APPLICATION FINDER XFCE
-# ============================================================
-RUN chmod 000 /usr/bin/thunar || true
-RUN chmod 000 /usr/bin/xfce4-appfinder || true
-RUN chmod 000 /usr/bin/xfrun4 || true
-
-# ============================================================
-# HAPUS MENU ENTRY TERMINAL DI XFCE
-# ============================================================
-RUN rm -f /usr/share/applications/xfce4-terminal.desktop || true
-RUN rm -f /usr/share/applications/xterm.desktop || true
-RUN rm -f /usr/share/applications/exo-terminal-emulator.desktop || true
-RUN rm -f /usr/share/applications/xfce4-appfinder.desktop || true
-RUN rm -f /usr/share/applications/thunar.desktop || true
-RUN rm -f /usr/share/applications/thunar-bulk-rename.desktop || true
-RUN rm -f /usr/share/applications/mousepad.desktop || true
-
-# ============================================================
-# KONFIGURASI XFCE - NONAKTIFKAN RIGHT CLICK MENU & KEYBOARD SHORTCUT
+# KONFIGURASI XFCE UNTUK restricteduser
 # ============================================================
 RUN mkdir -p /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml
 
@@ -245,7 +105,7 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-ke
 </channel>
 EOF
 
-# Konfigurasi XFWM4 - nonaktifkan fitur window management berbahaya
+# Nonaktifkan fitur window manager berbahaya
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
@@ -256,10 +116,7 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xm
 </channel>
 EOF
 
-# ============================================================
-# NONAKTIFKAN PANEL XFCE (agar tidak ada launcher terminal)
-# ============================================================
-RUN mkdir -p /home/restricteduser/.config/xfce4/panel
+# Panel XFCE minimal (hanya clock, tanpa launcher)
 RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-panel" version="1.0">
@@ -276,38 +133,157 @@ RUN cat > /home/restricteduser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-pa
     </property>
   </property>
   <property name="plugins" type="empty">
-    <property name="plugin-1" type="string" value="applicationsmenu"/>
+    <property name="plugin-1" type="string" value="clock"/>
   </property>
 </channel>
 EOF
 
-# ============================================================
-# AUTOSTART - HANYA FIREFOX YANG BOLEH JALAN
-# ============================================================
-RUN mkdir -p /home/restricteduser/.config/autostart
-RUN cat > /home/restricteduser/.config/autostart/firefox.desktop << 'EOF'
+# Autostart hanya Firefox
+RUN mkdir -p /home/restricteduser/.config/autostart && \
+    cat > /home/restricteduser/.config/autostart/firefox.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
 Name=Firefox
-Exec=firefox
+Exec=firefox --no-first-run --disable-restore-session-state
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
+# Fix ownership
+RUN chown -R restricteduser:restricteduser /home/restricteduser/
+
 # ============================================================
-# BUAT SCRIPT STARTUP
+# BUAT STARTUP SCRIPT
+# Blokir shell & command berbahaya dilakukan di SINI (runtime)
+# bukan saat build, agar Docker build tidak error
 # ============================================================
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
 
-# Jalankan sebagai root untuk setup VNC
-mkdir -p /home/restricteduser/.vnc
-echo "" | vncpasswd -f > /home/restricteduser/.vnc/passwd
-chmod 600 /home/restricteduser/.vnc/passwd
-chown -R restricteduser:restricteduser /home/restricteduser/
+echo "[*] Mengunci binary berbahaya..."
 
-# Buat xstartup untuk VNC
+# Daftar binary yang akan diblokir
+BLOCK_LIST=(
+    /bin/bash
+    /bin/sh
+    /bin/dash
+    /bin/rbash
+    /usr/bin/bash
+    /usr/bin/sh
+    /usr/bin/dash
+    /usr/bin/zsh
+    /usr/bin/fish
+    /usr/bin/ksh
+    /usr/bin/tcsh
+    /usr/bin/csh
+    /usr/bin/perl
+    /usr/bin/python3
+    /usr/bin/python3.10
+    /usr/bin/python
+    /usr/bin/ruby
+    /usr/bin/php
+    /usr/bin/lua
+    /usr/bin/node
+    /usr/bin/nodejs
+    /usr/bin/npm
+    /usr/bin/pip
+    /usr/bin/pip3
+    /usr/bin/vim
+    /usr/bin/vi
+    /usr/bin/nano
+    /usr/bin/emacs
+    /usr/bin/mousepad
+    /usr/bin/gedit
+    /usr/bin/xterm
+    /usr/bin/xfce4-terminal
+    /usr/bin/gnome-terminal
+    /usr/bin/xfce4-appfinder
+    /usr/bin/xfrun4
+    /usr/bin/thunar
+    /usr/bin/nautilus
+    /usr/bin/pcmanfm
+    /usr/bin/wget
+    /usr/bin/curl
+    /usr/bin/git
+    /usr/bin/ssh
+    /usr/bin/scp
+    /usr/bin/sftp
+    /usr/bin/ftp
+    /usr/bin/telnet
+    /usr/bin/nc
+    /usr/bin/netcat
+    /usr/bin/nmap
+    /usr/bin/apt
+    /usr/bin/apt-get
+    /usr/bin/dpkg
+    /usr/bin/snap
+    /usr/bin/su
+    /usr/bin/sudo
+    /usr/bin/passwd
+    /usr/bin/useradd
+    /usr/bin/usermod
+    /usr/bin/userdel
+    /usr/bin/chsh
+    /usr/bin/chpasswd
+    /usr/bin/adduser
+    /usr/bin/deluser
+    /usr/bin/visudo
+    /usr/bin/crontab
+    /usr/bin/at
+    /usr/bin/chmod
+    /usr/bin/chown
+    /usr/bin/chroot
+    /usr/bin/mount
+    /usr/bin/dd
+    /usr/bin/mkfs
+    /usr/bin/fdisk
+    /usr/bin/kill
+    /usr/bin/killall
+    /usr/bin/pkill
+    /usr/bin/top
+    /usr/bin/htop
+    /usr/bin/strace
+    /usr/bin/ltrace
+    /usr/bin/gdb
+    /usr/bin/find
+    /usr/bin/locate
+    /usr/bin/base64
+    /usr/bin/xxd
+    /usr/bin/hexdump
+    /usr/bin/strings
+    /usr/bin/zip
+    /usr/bin/unzip
+    /usr/bin/tar
+    /usr/bin/gzip
+    /usr/bin/xz
+    /usr/bin/rsync
+    /usr/bin/nmcli
+    /usr/bin/ifconfig
+    /usr/sbin/useradd
+    /usr/sbin/usermod
+    /usr/sbin/userdel
+    /usr/sbin/chpasswd
+    /usr/sbin/visudo
+    /sbin/mount
+    /sbin/fdisk
+)
+
+for binary in "${BLOCK_LIST[@]}"; do
+    if [ -f "$binary" ]; then
+        chmod 000 "$binary"
+        echo "  [BLOCKED] $binary"
+    fi
+done
+
+echo "[*] Binary berbahaya berhasil dikunci"
+
+# ============================================================
+# Setup VNC untuk restricteduser
+# ============================================================
+echo "[*] Setup VNC..."
+mkdir -p /home/restricteduser/.vnc
+
 cat > /home/restricteduser/.vnc/xstartup << 'XSTARTUP'
 #!/bin/bash
 export XDG_SESSION_TYPE=x11
@@ -318,40 +294,32 @@ exec startxfce4
 XSTARTUP
 
 chmod +x /home/restricteduser/.vnc/xstartup
-chown restricteduser:restricteduser /home/restricteduser/.vnc/xstartup
+chown -R restricteduser:restricteduser /home/restricteduser/
 
 # Jalankan VNC sebagai restricteduser
-su - restricteduser -s /bin/bash -c "vncserver :1 \
-    -localhost no \
-    -SecurityTypes None \
-    -geometry 1024x768 \
-    --I-KNOW-THIS-IS-INSECURE"
+echo "[*] Menjalankan VNC server..."
+su restricteduser -s /bin/bash -c \
+    "vncserver :1 -localhost no -SecurityTypes None -geometry 1024x768 --I-KNOW-THIS-IS-INSECURE"
 
-# Generate SSL cert
+# Generate SSL
+echo "[*] Generate SSL certificate..."
 openssl req -new -subj "/C=JP" -x509 -days 365 -nodes \
-    -out /self.pem -keyout /self.pem
+    -out /self.pem -keyout /self.pem 2>/dev/null
 
 # Jalankan websockify
+echo "[*] Menjalankan noVNC websockify..."
 websockify -D \
     --web=/usr/share/novnc/ \
     --cert=/self.pem \
     6080 localhost:5901
 
+echo "[*] Semua service berjalan!"
+echo "[*] Akses via browser: http://localhost:6080"
+
 tail -f /dev/null
 STARTSCRIPT
 
 RUN chmod +x /start.sh
-
-# ============================================================
-# PASTIKAN OWNERSHIP BENAR
-# ============================================================
-RUN chown -R restricteduser:restricteduser /home/restricteduser/
-
-# ============================================================
-# TAMBAHAN KEAMANAN - BLOKIR AKSES KE DIREKTORI SISTEM
-# ============================================================
-RUN chmod 000 /usr/bin/xdg-open || true
-RUN chmod 000 /usr/lib/x86_64-linux-gnu/xfce4/exo-1/exo-helper-1 || true
 
 EXPOSE 5901
 EXPOSE 6080
