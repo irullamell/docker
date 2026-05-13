@@ -36,9 +36,7 @@ RUN apt-get update -y && apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================
-# INSTALL FIREFOX
-# Pakai URL langsung ke releases Mozilla (tidak redirect)
-# Format: https://releases.mozilla.org/pub/firefox/releases/VERSION/linux-x86_64/en-US/
+# INSTALL FIREFOX - URL langsung ke releases Mozilla
 # ============================================================
 ARG FIREFOX_VERSION=126.0
 RUN wget -q \
@@ -273,10 +271,11 @@ openssl req -new \
 echo "    SSL ready ✓"
 
 echo "[5/5] Starting noVNC on port $NOVNC_PORT..."
+# FIX: --ssl-only adalah flag boolean, tidak pakai nilai =false
+# Tanpa --ssl-only, websockify accept HTTP dan HTTPS (lebih fleksibel untuk Railway)
 websockify \
     --web=/usr/share/novnc/ \
     --cert=/self.pem \
-    --ssl-only=false \
     --log-file=/var/log/websockify.log \
     0.0.0.0:$NOVNC_PORT \
     localhost:$VNC_PORT &
@@ -345,7 +344,6 @@ while true; do
         websockify \
             --web=/usr/share/novnc/ \
             --cert=/self.pem \
-            --ssl-only=false \
             --log-file=/var/log/websockify.log \
             0.0.0.0:$NOVNC_PORT \
             localhost:$VNC_PORT &
