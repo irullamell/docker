@@ -16,6 +16,7 @@ RUN apt update -y && apt install --no-install-recommends -y \
     python3 \
     python3-pip \
     procps \
+    iproute2 \
     && apt update -y && apt install -y \
     dbus-x11 \
     x11-utils \
@@ -50,14 +51,14 @@ RUN rm -f \
     /usr/share/applications/mousepad.desktop 2>/dev/null || true
 
 # ============================================================
-# REPLACE index.html novnc - auto redirect + auto connect
+# REPLACE index.html novnc
 # ============================================================
 RUN cat > /usr/share/novnc/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Loading VNC...</title>
+    <title>Desktop</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -68,9 +69,8 @@ RUN cat > /usr/share/novnc/index.html << 'EOF'
             height: 100vh;
             font-family: Arial, sans-serif;
             color: white;
-        }
-        .loader {
-            text-align: center;
+            flex-direction: column;
+            gap: 20px;
         }
         .spinner {
             width: 50px;
@@ -79,25 +79,38 @@ RUN cat > /usr/share/novnc/index.html << 'EOF'
             border-top: 5px solid #4fc3f7;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        p { font-size: 18px; color: #4fc3f7; }
     </style>
     <script>
-        // Redirect paksa ke vnc.html dengan autoconnect
-        window.onload = function() {
-            window.location.href = '/vnc.html?autoconnect=1&reconnect=1&reconnect_delay=2000&resize=scale&quality=6&compression=2&show_dot=false&path=websockify';
-        };
+        function redirect() {
+            var host = window.location.hostname;
+            var port = window.location.port;
+            var protocol = window.location.protocol;
+            var wsProtocol = protocol === 'https:' ? 'wss' : 'ws';
+
+            // Build URL dengan path yang benar
+            var url = '/vnc.html?autoconnect=1' +
+                      '&reconnect=1' +
+                      '&reconnect_delay=2000' +
+                      '&resize=scale' +
+                      '&quality=6' +
+                      '&compression=2' +
+                      '&path=websockify';
+
+            window.location.href = url;
+        }
+        // Redirect setelah 1 detik
+        setTimeout(redirect, 1000);
     </script>
 </head>
 <body>
-    <div class="loader">
-        <div class="spinner"></div>
-        <p>Connecting to Desktop...</p>
-    </div>
+    <div class="spinner"></div>
+    <p>Connecting to Desktop...</p>
 </body>
 </html>
 EOF
@@ -171,8 +184,6 @@ NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
 
-RUN chown -R restricteduser:restricteduser /home/restricteduser/
-
 # ============================================================
 # VNC xstartup
 # ============================================================
@@ -192,19 +203,30 @@ RUN chmod +x /home/restricteduser/.vnc/xstartup && \
 
 # ============================================================
 # STARTUP SCRIPT
+# Railway inject $PORT environment variable
+# Kita harus listen di $PORT bukan hardcode 6080
 # ============================================================
 RUN cat > /start.sh << 'STARTSCRIPT'
 #!/bin/bash
-set -e
+
+# ============================================================
+# Railway menggunakan $PORT environment variable
+# Default fallback ke 8080 jika tidak ada
+# ============================================================
+NOVNC_PORT=${PORT:-8080}
+VNC_PORT=5901
+VNC_DISPLAY=:1
 
 echo "================================================"
-echo " Starting Desktop Environment"
+echo " Railway Desktop Environment"
+echo " noVNC Port : $NOVNC_PORT"
+echo " VNC Port   : $VNC_PORT"
 echo "================================================"
 
 # ============================================================
-# STEP 1: Cleanup VNC lock files lama
+# STEP 1: Cleanup
 # ============================================================
-echo "[1/6] Cleanup lock files..."
+echo "[1/5] Cleanup..."
 rm -f /tmp/.X1-lock
 rm -f /tmp/.X11-unix/X1
 rm -rf /home/restricteduser/.vnc/*.pid
@@ -213,163 +235,136 @@ rm -rf /home/restricteduser/.vnc/*.log
 # ============================================================
 # STEP 2: Fix permissions
 # ============================================================
-echo "[2/6] Fix permissions..."
+echo "[2/5] Fix permissions..."
 chown -R restricteduser:restricteduser /home/restricteduser/
-chmod 700 /home/restricteduser/.vnc
-chmod 600 /home/restricteduser/.vnc/xstartup 2>/dev/null || true
 chmod +x /home/restricteduser/.vnc/xstartup
 
 # ============================================================
 # STEP 3: Start VNC Server
 # ============================================================
-echo "[3/6] Starting VNC Server..."
+echo "[3/5] Starting VNC Server on $VNC_PORT..."
 su - restricteduser -s /bin/bash -c \
-    "vncserver :1 \
+    "vncserver $VNC_DISPLAY \
     -localhost no \
     -SecurityTypes None \
     -geometry 1280x720 \
     -depth 24 \
-    --I-KNOW-THIS-IS-INSECURE \
-    2>&1"
+    --I-KNOW-THIS-IS-INSECURE" 2>&1
 
-# Tunggu VNC benar-benar ready
-echo "    Waiting for VNC to be ready..."
-for i in $(seq 1 30); do
-    if ss -tlnp | grep -q ':5901'; then
-        echo "    VNC ready on port 5901 ✓"
+# Tunggu VNC ready
+echo "    Waiting for VNC..."
+RETRY=0
+while [ $RETRY -lt 30 ]; do
+    if ss -tlnp 2>/dev/null | grep -q ":$VNC_PORT" || \
+       netstat -tlnp 2>/dev/null | grep -q ":$VNC_PORT"; then
+        echo "    VNC ready ✓"
         break
     fi
-    echo "    Waiting... ($i/30)"
-    sleep 1
+    RETRY=$((RETRY + 1))
+    echo "    Retry $RETRY/30..."
+    sleep 2
 done
 
 # ============================================================
-# STEP 4: Generate SSL Certificate
+# STEP 4: Generate SSL
 # ============================================================
-echo "[4/6] Generating SSL certificate..."
+echo "[4/5] Generating SSL..."
 openssl req -new \
     -subj "/C=JP/O=Desktop/CN=localhost" \
     -x509 -days 365 -nodes \
     -out /self.pem \
     -keyout /self.pem 2>/dev/null
-echo "    SSL certificate generated ✓"
+echo "    SSL ready ✓"
 
 # ============================================================
-# STEP 5: Start Websockify
+# STEP 5: Start Websockify di PORT yang Railway berikan
 # ============================================================
-echo "[5/6] Starting websockify (noVNC)..."
+echo "[5/5] Starting noVNC on port $NOVNC_PORT..."
+
+# Jalankan websockify foreground agar Railway tahu app sudah ready
 websockify \
     --web=/usr/share/novnc/ \
     --cert=/self.pem \
     --ssl-only=false \
     --log-file=/var/log/websockify.log \
-    0.0.0.0:6080 \
-    localhost:5901 &
+    0.0.0.0:$NOVNC_PORT \
+    localhost:$VNC_PORT &
 
 WEBSOCKIFY_PID=$!
-echo "    Websockify PID: $WEBSOCKIFY_PID"
 
 # Tunggu websockify ready
 sleep 3
+
 if kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
-    echo "    Websockify ready on port 6080 ✓"
+    echo "    noVNC ready on port $NOVNC_PORT ✓"
 else
-    echo "    [ERROR] Websockify failed! Check log:"
+    echo "[ERROR] Websockify failed!"
     cat /var/log/websockify.log
     exit 1
 fi
 
+echo ""
+echo "================================================"
+echo " READY!"
+echo " Access: https://your-app.railway.app"
+echo "================================================"
+
 # ============================================================
-# STEP 6: Blokir binary berbahaya
+# Block binary berbahaya setelah semua service jalan
 # ============================================================
-echo "[6/6] Blocking dangerous binaries..."
+echo "Blocking dangerous binaries..."
 
 BLOCK_LIST=(
-    /usr/bin/xterm
-    /usr/bin/xfce4-terminal
-    /usr/bin/gnome-terminal
-    /usr/bin/xfce4-appfinder
-    /usr/bin/xfrun4
-    /usr/bin/thunar
-    /usr/bin/nautilus
-    /usr/bin/pcmanfm
-    /usr/bin/mousepad
-    /usr/bin/gedit
-    /usr/bin/vim
-    /usr/bin/vi
-    /usr/bin/nano
-    /usr/bin/emacs
-    /usr/bin/wget
-    /usr/bin/curl
-    /usr/bin/git
-    /usr/bin/ssh
-    /usr/bin/scp
-    /usr/bin/ftp
-    /usr/bin/telnet
-    /usr/bin/nc
-    /usr/bin/nmap
-    /usr/bin/apt
-    /usr/bin/apt-get
-    /usr/bin/dpkg
-    /usr/bin/snap
-    /usr/bin/su
-    /usr/bin/sudo
-    /usr/bin/passwd
-    /usr/bin/useradd
-    /usr/bin/usermod
-    /usr/bin/adduser
-    /usr/bin/visudo
-    /usr/bin/crontab
-    /usr/bin/top
-    /usr/bin/htop
-    /usr/bin/strace
-    /usr/bin/find
-    /usr/bin/base64
-    /usr/bin/xxd
-    /usr/bin/zip
-    /usr/bin/unzip
-    /usr/bin/tar
-    /usr/bin/rsync
-    /usr/bin/nmcli
-    /usr/bin/perl
-    /usr/bin/ruby
-    /usr/bin/php
-    /usr/bin/lua
-    /usr/bin/node
-    /usr/bin/npm
+    /usr/bin/xterm /usr/bin/xfce4-terminal
+    /usr/bin/gnome-terminal /usr/bin/xfce4-appfinder
+    /usr/bin/xfrun4 /usr/bin/thunar
+    /usr/bin/nautilus /usr/bin/pcmanfm
+    /usr/bin/mousepad /usr/bin/gedit
+    /usr/bin/vim /usr/bin/vi /usr/bin/nano
+    /usr/bin/emacs /usr/bin/wget /usr/bin/curl
+    /usr/bin/git /usr/bin/ssh /usr/bin/scp
+    /usr/bin/ftp /usr/bin/telnet
+    /usr/bin/nc /usr/bin/nmap
+    /usr/bin/apt /usr/bin/apt-get /usr/bin/dpkg
+    /usr/bin/snap /usr/bin/su /usr/bin/sudo
+    /usr/bin/passwd /usr/bin/useradd
+    /usr/bin/adduser /usr/bin/visudo
+    /usr/bin/crontab /usr/bin/top /usr/bin/htop
+    /usr/bin/strace /usr/bin/find
+    /usr/bin/base64 /usr/bin/xxd
+    /usr/bin/zip /usr/bin/unzip /usr/bin/tar
+    /usr/bin/rsync /usr/bin/nmcli
+    /usr/bin/perl /usr/bin/ruby
+    /usr/bin/php /usr/bin/lua
+    /usr/bin/node /usr/bin/npm
 )
 
-BLOCKED=0
 for binary in "${BLOCK_LIST[@]}"; do
     if [ -f "$binary" ]; then
         chmod 000 "$binary"
-        BLOCKED=$((BLOCKED + 1))
     fi
 done
-echo "    Blocked $BLOCKED binaries ✓"
+echo "Binaries blocked ✓"
 
 # ============================================================
-# DONE
+# Monitor - keep container alive & restart jika mati
 # ============================================================
-echo ""
-echo "================================================"
-echo " Desktop Environment Ready!"
-echo " Access: http://localhost:6080"
-echo " VNC akan auto-connect"
-echo "================================================"
-echo ""
-
-# Monitor processes
 while true; do
-    # Cek VNC masih jalan
-    if ! su - restricteduser -s /bin/bash -c "vncserver -list 2>/dev/null" | grep -q ":1"; then
+    # Cek VNC
+    if ! su - restricteduser -s /bin/bash -c \
+        "vncserver -list 2>/dev/null" | grep -q "$VNC_DISPLAY"; then
         echo "[!] VNC died, restarting..."
         rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
         su - restricteduser -s /bin/bash -c \
-            "vncserver :1 -localhost no -SecurityTypes None -geometry 1280x720 -depth 24 --I-KNOW-THIS-IS-INSECURE"
+            "vncserver $VNC_DISPLAY \
+            -localhost no \
+            -SecurityTypes None \
+            -geometry 1280x720 \
+            -depth 24 \
+            --I-KNOW-THIS-IS-INSECURE"
     fi
 
-    # Cek websockify masih jalan
+    # Cek websockify
     if ! kill -0 $WEBSOCKIFY_PID 2>/dev/null; then
         echo "[!] Websockify died, restarting..."
         websockify \
@@ -377,8 +372,8 @@ while true; do
             --cert=/self.pem \
             --ssl-only=false \
             --log-file=/var/log/websockify.log \
-            0.0.0.0:6080 \
-            localhost:5901 &
+            0.0.0.0:$NOVNC_PORT \
+            localhost:$VNC_PORT &
         WEBSOCKIFY_PID=$!
     fi
 
@@ -388,7 +383,7 @@ STARTSCRIPT
 
 RUN chmod +x /start.sh
 
-EXPOSE 5901
-EXPOSE 6080
+# Railway detect port dari EXPOSE
+EXPOSE 8080
 
 CMD ["/start.sh"]
