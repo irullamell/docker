@@ -15,8 +15,17 @@ RUN apt update -y && apt install --no-install-recommends -y \
     software-properties-common ca-certificates \
     pulseaudio pavucontrol
 
-# ===== CHROMIUM BROWSER (PRIMARY) =====
-RUN apt install -y chromium-browser chromium-codecs-ffmpeg chromium-common
+# ===== ADD CHROMIUM PPA & INSTALL =====
+RUN apt install -y software-properties-common && \
+    add-apt-repository ppa:a-maintainers/chromium -y && \
+    apt update -y && \
+    apt install -y chromium-browser
+
+# Alternative if PPA fails - Install from snap
+RUN if ! command -v chromium-browser &> /dev/null; then \
+    apt install -y snapd && \
+    snap install chromium; \
+fi
 
 # ===== CHROMIUM PERFORMANCE CONFIGURATION =====
 RUN mkdir -p /root/.config/chromium/Default && \
@@ -193,7 +202,15 @@ sleep 3
 
 echo "🌐 Starting Chromium Browser..."
 export DISPLAY=:1
-chromium-browser \
+
+# Check if chromium is available from snap
+if command -v chromium &> /dev/null; then
+    CHROMIUM_CMD="chromium"
+else
+    CHROMIUM_CMD="chromium-browser"
+fi
+
+$CHROMIUM_CMD \
     --disable-background-timer-throttling \
     --disable-backgrounding-occluded-windows \
     --disable-breakpad \
