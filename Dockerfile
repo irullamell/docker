@@ -13,19 +13,20 @@ RUN apt update -y && apt install --no-install-recommends -y \
     sudo curl wget git \
     dbus-x11 x11-utils x11-xserver-utils x11-apps \
     software-properties-common ca-certificates \
-    pulseaudio pavucontrol
+    pulseaudio pavucontrol \
+    snapd
 
-# ===== ADD CHROMIUM PPA & INSTALL =====
-RUN apt install -y software-properties-common && \
-    add-apt-repository ppa:a-maintainers/chromium -y && \
-    apt update -y && \
-    apt install -y chromium-browser
+# ===== INSTALL CHROMIUM FROM SNAP (RELIABLE) =====
+RUN snap install chromium
 
-# Alternative if PPA fails - Install from snap
-RUN if ! command -v chromium-browser &> /dev/null; then \
-    apt install -y snapd && \
-    snap install chromium; \
-fi
+# ===== CREATE CHROMIUM WRAPPER FOR EASIER USAGE =====
+RUN mkdir -p /usr/local/bin && \
+    cat > /usr/local/bin/chromium-browser << 'WRAPPER'
+#!/bin/bash
+exec /snap/bin/chromium "$@"
+WRAPPER
+
+RUN chmod +x /usr/local/bin/chromium-browser
 
 # ===== CHROMIUM PERFORMANCE CONFIGURATION =====
 RUN mkdir -p /root/.config/chromium/Default && \
@@ -202,15 +203,9 @@ sleep 3
 
 echo "🌐 Starting Chromium Browser..."
 export DISPLAY=:1
+export SNAP_USER_DATA=/root/snap
 
-# Check if chromium is available from snap
-if command -v chromium &> /dev/null; then
-    CHROMIUM_CMD="chromium"
-else
-    CHROMIUM_CMD="chromium-browser"
-fi
-
-$CHROMIUM_CMD \
+/snap/bin/chromium \
     --disable-background-timer-throttling \
     --disable-backgrounding-occluded-windows \
     --disable-breakpad \
@@ -257,7 +252,7 @@ echo "==============================================="
 echo ""
 echo "📍 Access VNC at: http://localhost:6080"
 echo "📍 VNC Port: 5901"
-echo "📍 Browser: Chromium (Optimized)"
+echo "📍 Browser: Chromium (Snap - Optimized)"
 echo "📍 Resolution: 1920x1080"
 echo ""
 
@@ -294,7 +289,7 @@ UsesRFBV6=0
 EOF
 
 # ===== USER SETUP =====
-RUN useradd -m -s /bin/bash -G sudo,audio,video,render user && \
+RUN useradd -m -s /bin/bash -G sudo,audio,video,render,snap_core user && \
     echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
     mkdir -p /home/user/.config/chromium/Default && \
     cp /root/.config/chromium/Default/Preferences /home/user/.config/chromium/Default/ 2>/dev/null || true && \
