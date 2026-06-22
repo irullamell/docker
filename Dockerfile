@@ -162,63 +162,92 @@ RUN mkdir -p /root/.config/xfce4/panel && \
 </channel>
 EOF
 
-# ===== CREATE CHROMIUM STARTUP SCRIPT =====
+# ===== CREATE STARTUP SCRIPT =====
 RUN mkdir -p /usr/local/bin && \
-    cat > /usr/local/bin/start-chromium.sh << 'SCRIPT'
+    cat > /usr/local/bin/start.sh << 'STARTSCRIPT'
 #!/bin/bash
+set -e
+
+echo "==============================================="
+echo "  🚀 Chromium Heavy Browsing Optimization Mode  "
+echo "==============================================="
+echo ""
+
+echo "⚙️  Optimizing system kernel..."
+sysctl -p > /dev/null 2>&1
+
+echo "💾 Clearing cache..."
+sync
+echo 3 > /proc/sys/vm/drop_caches
+
+echo "🖥️  Starting VNC Server on :1 (5901)..."
+vncserver \
+    -localhost no \
+    -SecurityTypes None \
+    -geometry 1920x1080 \
+    -depth 24 \
+    -rfbport 5901 \
+    --I-KNOW-THIS-IS-INSECURE
+
+sleep 3
+
+echo "🌐 Starting Chromium Browser..."
 export DISPLAY=:1
-
-mkdir -p /root/.config/chromium/Default
-
 chromium-browser \
     --disable-background-timer-throttling \
     --disable-backgrounding-occluded-windows \
     --disable-breakpad \
     --disable-client-side-phishing-detection \
-    --disable-component-extensions-with-background-pages \
     --disable-default-apps \
-    --disable-device-discovery-notifications \
     --disable-extensions \
-    --disable-features=InterestFeedContentSuggestions,Translate,TranslateUI \
+    --disable-features=InterestFeedContentSuggestions,Translate \
     --disable-file-system-api \
     --disable-geolocation \
     --disable-hang-monitor \
-    --disable-ipc-flooding-protection \
-    --disable-media-session-api \
     --disable-metrics \
-    --disable-permissions-api \
-    --disable-preconnect-to-search \
-    --disable-prompt-on-repost \
-    --disable-renderer-backgrounding \
     --disable-sync \
-    --disable-sync-types \
-    --enable-automation \
-    --enable-features=NetworkService,NetworkServiceInProcess \
     --enable-gpu \
     --enable-gpu-compositing \
     --enable-native-gpu-memory-buffers \
     --enable-zero-copy \
     --enable-quic \
-    --enable-tcp-fast-open \
-    --enable-preconnect \
     --ignore-gpu-blacklist \
     --force-gpu-mem-available-mb=2048 \
-    --force-gpu-mem-total-mb=8192 \
     --password-store=basic \
     --use-mock-keychain \
     --no-default-browser-check \
-    --no-service-autorun \
     --process-per-site \
-    --process-per-tab \
     --renderer-process-limit=128 \
-    --num-raster-threads=4 \
-    --metrics-recording-only \
     about:blank > /dev/null 2>&1 &
 
-wait
-SCRIPT
+sleep 2
 
-RUN chmod 755 /usr/local/bin/start-chromium.sh
+echo "🔐 Generating SSL Certificate..."
+openssl req -new -subj '/C=JP/ST=Tokyo/L=Tokyo/O=Local/CN=localhost' \
+    -x509 -days 365 -nodes -out self.pem -keyout self.pem 2>/dev/null
+
+echo "🌍 Starting WebSocket Proxy on 6080..."
+websockify -D \
+    --web=/usr/share/novnc/ \
+    --cert=self.pem \
+    --min-backlog=64 \
+    6080 localhost:5901
+
+echo ""
+echo "==============================================="
+echo "✅ SYSTEM READY FOR HEAVY BROWSING!"
+echo "==============================================="
+echo ""
+echo "📍 Access VNC at: http://localhost:6080"
+echo "📍 VNC Port: 5901"
+echo "📍 Browser: Chromium (Optimized)"
+echo "📍 Resolution: 1920x1080"
+echo ""
+
+tail -f /dev/null
+STARTSCRIPT
+
+RUN chmod +x /usr/local/bin/start.sh
 
 # ===== OPTIONAL: ADDITIONAL TOOLS =====
 RUN apt install -y --no-install-recommends \
@@ -272,79 +301,5 @@ RUN touch /root/.Xauthority
 EXPOSE 5901
 EXPOSE 6080
 
-# ===== OPTIMIZED STARTUP SCRIPT =====
-CMD bash -c "\
-    echo '===============================================' && \
-    echo '  🚀 Chromium Heavy Browsing Optimization Mode  ' && \
-    echo '===============================================' && \
-    echo '' && \
-    \
-    echo '⚙️  Optimizing system kernel...' && \
-    sysctl -p > /dev/null 2>&1 && \
-    \
-    echo '💾 Clearing cache...' && \
-    sync && \
-    echo 3 > /proc/sys/vm/drop_caches && \
-    \
-    echo '🖥️  Starting VNC Server on :1 (5901)...' && \
-    vncserver \
-        -localhost no \
-        -SecurityTypes None \
-        -geometry 1920x1080 \
-        -depth 24 \
-        -rfbport 5901 \
-        --I-KNOW-THIS-IS-INSECURE && \
-    sleep 3 && \
-    \
-    echo '🌐 Starting Chromium Browser...' && \
-    DISPLAY=:1 chromium-browser \
-        --disable-background-timer-throttling \
-        --disable-backgrounding-occluded-windows \
-        --disable-breakpad \
-        --disable-client-side-phishing-detection \
-        --disable-default-apps \
-        --disable-extensions \
-        --disable-features=InterestFeedContentSuggestions,Translate \
-        --disable-file-system-api \
-        --disable-geolocation \
-        --disable-hang-monitor \
-        --disable-metrics \
-        --disable-sync \
-        --enable-gpu \
-        --enable-gpu-compositing \
-        --enable-native-gpu-memory-buffers \
-        --enable-zero-copy \
-        --enable-quic \
-        --ignore-gpu-blacklist \
-        --force-gpu-mem-available-mb=2048 \
-        --password-store=basic \
-        --use-mock-keychain \
-        --no-default-browser-check \
-        --process-per-site \
-        --renderer-process-limit=128 \
-        about:blank > /dev/null 2>&1 &
-    sleep 2 && \
-    \
-    echo '🔐 Generating SSL Certificate...' && \
-    openssl req -new -subj '/C=JP/ST=Tokyo/L=Tokyo/O=Local/CN=localhost' \
-        -x509 -days 365 -nodes -out self.pem -keyout self.pem 2>/dev/null && \
-    \
-    echo '🌍 Starting WebSocket Proxy on 6080...' && \
-    websockify -D \
-        --web=/usr/share/novnc/ \
-        --cert=self.pem \
-        --min-backlog=64 \
-        6080 localhost:5901 && \
-    \
-    echo '' && \
-    echo '===============================================' && \
-    echo '✅ SYSTEM READY FOR HEAVY BROWSING!' && \
-    echo '===============================================' && \
-    echo '' && \
-    echo '📍 Access VNC at: http://localhost:6080' && \
-    echo '📍 VNC Port: 5901' && \
-    echo '📍 Browser: Chromium (Optimized)' && \
-    echo '📍 Resolution: 1920x1080' && \
-    echo '' && \
-    \
-    tail -f /dev/null"
+# ===== START =====
+ENTRYPOINT ["/usr/local/bin/start.sh"]
