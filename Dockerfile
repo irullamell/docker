@@ -65,61 +65,6 @@ RUN mkdir -p /root/.config/chromium/Default && \
 }
 EOF
 
-# Chromium Command Line Flags
-RUN cat > /root/.config/chromium/Default/chrome-flags << 'EOF'
---disable-background-timer-throttling
---disable-backgrounding-occluded-windows
---disable-breakpad
---disable-client-side-phishing-detection
---disable-component-extensions-with-background-pages
---disable-component-update
---disable-default-apps
---disable-device-discovery-notifications
---disable-extensions
---disable-features=InterestFeedContentSuggestions,Translate
---disable-field-trial-config
---disable-file-system-api
---disable-ftp-support
---disable-geolocation
---disable-hang-monitor
---disable-ipc-flooding-protection
---disable-media-session-api
---disable-metrics
---disable-permissions-api
---disable-popup-blocking
---disable-prompt-on-repost
---disable-renderer-backgrounding
---disable-sync
---disable-sync-types
---disable-web-resources
---enable-automation
---enable-features=NetworkService,NetworkServiceInProcess
---enable-quic
---enable-tcp-fast-open
---enable-preconnect
---net-log-capture-mode=IncludeCookiesAndCredentials
---new-window
---no-default-browser-check
---no-service-autorun
---password-store=basic
---use-mock-keychain
---enable-gpu
---enable-gpu-compositing
---enable-native-gpu-memory-buffers
---ignore-gpu-blacklist
---enable-zero-copy
---enable-direct-composition
---force-gpu-mem-available-mb=2048
---force-gpu-mem-total-mb=8192
---disable-gpu-driver-bug-workarounds
---enable-features=VizDisplayCompositor
---renderer-process-limit=128
---disable-extensions-except=""
---disable-preconnect-to-search
---process-per-site
---process-per-tab
-EOF
-
 # ===== SYSTEM KERNEL TUNING =====
 RUN cat >> /etc/sysctl.conf << 'EOF'
 # VM Memory Management
@@ -217,18 +162,14 @@ RUN mkdir -p /root/.config/xfce4/panel && \
 </channel>
 EOF
 
-# ===== CHROMIUM LAUNCH SCRIPT =====
-RUN cat > /usr/local/bin/start-chromium.sh << 'EOF'
+# ===== CREATE CHROMIUM STARTUP SCRIPT =====
+RUN mkdir -p /usr/local/bin && \
+    cat > /usr/local/bin/start-chromium.sh << 'SCRIPT'
 #!/bin/bash
 export DISPLAY=:1
 
-# Get Chromium version for profile compatibility
-CHROMIUM_VERSION=$(chromium-browser --version | awk '{print $NF}')
-
-# Create/update Chrome profile directory
 mkdir -p /root/.config/chromium/Default
 
-# Chromium command with optimization flags
 chromium-browser \
     --disable-background-timer-throttling \
     --disable-backgrounding-occluded-windows \
@@ -269,20 +210,17 @@ chromium-browser \
     --no-service-autorun \
     --process-per-site \
     --process-per-tab \
-    --disable-background-timer-throttling \
     --renderer-process-limit=128 \
     --num-raster-threads=4 \
-    --disable-hang-monitor \
-    --disable-gpu-shader-disk-cache \
     --metrics-recording-only \
-    --mute-audio \
-    about:blank &
+    about:blank > /dev/null 2>&1 &
 
 wait
-EOF
-chmod +x /usr/local/bin/start-chromium.sh
+SCRIPT
 
-# ===== OPTIONAL: ADDITIONAL BROWSERS/TOOLS =====
+RUN chmod 755 /usr/local/bin/start-chromium.sh
+
+# ===== OPTIONAL: ADDITIONAL TOOLS =====
 RUN apt install -y --no-install-recommends \
     htop iotop \
     mesa-utils libgl1-mesa-glx \
@@ -329,8 +267,7 @@ RUN apt clean && \
     rm -rf /var/tmp/*
 
 # ===== INITIALIZATION =====
-RUN touch /root/.Xauthority && \
-    chmod 600 /root/.Xauthority
+RUN touch /root/.Xauthority
 
 EXPOSE 5901
 EXPOSE 6080
@@ -340,6 +277,7 @@ CMD bash -c "\
     echo '===============================================' && \
     echo '  🚀 Chromium Heavy Browsing Optimization Mode  ' && \
     echo '===============================================' && \
+    echo '' && \
     \
     echo '⚙️  Optimizing system kernel...' && \
     sysctl -p > /dev/null 2>&1 && \
@@ -355,9 +293,7 @@ CMD bash -c "\
         -geometry 1920x1080 \
         -depth 24 \
         -rfbport 5901 \
-        -fg \
-        --I-KNOW-THIS-IS-INSECURE &
-    VNC_PID=\$! && \
+        --I-KNOW-THIS-IS-INSECURE && \
     sleep 3 && \
     \
     echo '🌐 Starting Chromium Browser...' && \
@@ -387,7 +323,6 @@ CMD bash -c "\
         --process-per-site \
         --renderer-process-limit=128 \
         about:blank > /dev/null 2>&1 &
-    CHROMIUM_PID=\$! && \
     sleep 2 && \
     \
     echo '🔐 Generating SSL Certificate...' && \
