@@ -25,6 +25,7 @@ RUN apt update -y && apt install --no-install-recommends -y \
     git \
     openssl \
     procps \
+    net-tools \
     dbus \
     dbus-x11 \
     x11-utils \
@@ -110,7 +111,6 @@ RUN mkdir -p /root/.config/google-chrome/Default && \
 }
 EOF
 
-# ===== CHROME FIRST RUN FLAG =====
 RUN touch "/root/.config/google-chrome/First Run"
 
 # ===== XFCE MINIMAL CONFIG =====
@@ -164,30 +164,7 @@ RUN mkdir -p /root/.config/autostart && \
 [Desktop Entry]
 Type=Application
 Name=Google Chrome
-Exec=google-chrome-stable \
-    --no-sandbox \
-    --disable-dev-shm-usage \
-    --disable-gpu \
-    --disable-software-rasterizer \
-    --no-first-run \
-    --no-default-browser-check \
-    --disable-sync \
-    --disable-extensions \
-    --disable-background-networking \
-    --disable-breakpad \
-    --disable-client-side-phishing-detection \
-    --disable-default-apps \
-    --disable-hang-monitor \
-    --disable-metrics \
-    --disable-metrics-reporting \
-    --disable-translate \
-    --disable-background-timer-throttling \
-    --disable-backgrounding-occluded-windows \
-    --disable-ipc-flooding-protection \
-    --password-store=basic \
-    --use-mock-keychain \
-    --window-size=1820,980 \
-    about:blank
+Exec=google-chrome-stable --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --no-first-run --no-default-browser-check --disable-sync --disable-extensions --disable-background-networking --disable-breakpad --disable-client-side-phishing-detection --disable-default-apps --disable-hang-monitor --disable-metrics --disable-metrics-reporting --disable-translate --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-ipc-flooding-protection --password-store=basic --use-mock-keychain --window-size=1820,980 about:blank
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
@@ -225,61 +202,134 @@ RUN chmod +x /root/.vnc/xstartup
 RUN cat > /usr/local/bin/start.sh << 'STARTSCRIPT'
 #!/bin/bash
 
-echo "================================================"
-echo "  🚀 VNC Browser - Railway Ready                "
-echo "================================================"
+# ============================================
+# Logging helper - semua output ke stdout
+# agar Railway bisa capture log
+# ============================================
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
 
-# Railway inject $PORT otomatis, fallback ke 6080
+log_section() {
+    echo ""
+    echo "============================================"
+    echo "  $1"
+    echo "============================================"
+}
+
+# Redirect semua stderr ke stdout
+exec 2>&1
+
+log_section "🚀 VNC Browser Starting - Railway Mode"
+
+# ===== ENV SETUP =====
 VNC_PORT=${VNC_PORT:-5901}
 NOVNC_PORT=${PORT:-6080}
 RESOLUTION=${RESOLUTION:-1280x800}
 
-echo "📌 noVNC Port : $NOVNC_PORT"
-echo "📌 VNC Port   : $VNC_PORT"
-echo "📌 Resolution : $RESOLUTION"
-echo ""
+log "PORT env dari Railway : ${PORT:-tidak ada, pakai 6080}"
+log "noVNC Port            : $NOVNC_PORT"
+log "VNC Port              : $VNC_PORT"
+log "Resolution            : $RESOLUTION"
+log "Hostname              : $(hostname)"
+log "User                  : $(whoami)"
+log "PWD                   : $(pwd)"
+
+# ===== CEK BINARY =====
+log_section "🔍 Cek Binary"
+for bin in vncserver websockify openssl google-chrome-stable Xvnc; do
+    path=$(which $bin 2>/dev/null)
+    if [ -n "$path" ]; then
+        log "✅ $bin => $path"
+    else
+        log "❌ $bin => NOT FOUND"
+    fi
+done
+
+# ===== CEK PORT TERSEDIA =====
+log_section "🔍 Cek Port"
+log "Port yang dipakai Railway: $NOVNC_PORT"
+if netstat -tuln 2>/dev/null | grep -q ":$NOVNC_PORT "; then
+    log "⚠️  Port $NOVNC_PORT sudah dipakai!"
+else
+    log "✅ Port $NOVNC_PORT tersedia"
+fi
 
 # ===== CLEANUP =====
+log_section "🧹 Cleanup"
 rm -f /tmp/.X1-lock
 rm -f /tmp/.X11-unix/X1
 rm -rf /root/.vnc/*.pid
 rm -rf /root/.vnc/*.log
+log "✅ Cleanup selesai"
 
 # ===== DBUS =====
+log_section "🔧 Setup DBus"
 mkdir -p /run/dbus
-dbus-daemon --system --fork 2>/dev/null || true
+rm -f /run/dbus/pid
+dbus-daemon --system --fork 2>&1 && log "✅ dbus-daemon OK" || log "⚠️  dbus-daemon gagal (lanjut)"
 sleep 1
 
 # ===== XDG RUNTIME =====
 mkdir -p /tmp/runtime-root
 chmod 700 /tmp/runtime-root
+log "✅ XDG_RUNTIME_DIR OK"
 
 # ===== START VNC =====
-echo "🖥️  Starting TigerVNC..."
+log_section "🖥️  Starting TigerVNC"
+log "Command: vncserver :1 -localhost no -SecurityTypes None -geometry $RESOLUTION -depth 24 -rfbport $VNC_PORT"
+
 vncserver :1 \
     -localhost no \
     -SecurityTypes None \
     -geometry $RESOLUTION \
     -depth 24 \
     -rfbport $VNC_PORT \
-    --I-KNOW-THIS-IS-INSECURE \
-    2>/tmp/vnc.log
+    --I-KNOW-THIS-IS-INSECURE
 
-if [ $? -ne 0 ]; then
-    echo "❌ VNC gagal start! Log:"
-    cat /tmp/vnc.log
+VNC_EXIT=$?
+log "VNC exit code: $VNC_EXIT"
+
+if [ $VNC_EXIT -ne 0 ]; then
+    log "❌ VNC GAGAL START!"
+    log "--- VNC Log ---"
+    cat /root/.vnc/*.log 2>/dev/null || log "(tidak ada log)"
+    log "--- Xvnc tersedia? ---"
+    ls -la /usr/bin/Xvnc 2>/dev/null || log "Xvnc tidak ditemukan"
+    log "--- tigervnc info ---"
+    dpkg -l | grep -i tiger 2>/dev/null || log "tigervnc tidak terinstall"
     exit 1
 fi
 
-echo "✅ VNC OK"
-sleep 4
+log "✅ VNC berhasil start"
+
+# Tampilkan VNC log
+log "--- VNC Log ---"
+cat /root/.vnc/*.log 2>/dev/null | tail -20 || true
+
+sleep 5
 
 # ===== TEST DISPLAY =====
+log_section "🔍 Test Display"
 export DISPLAY=:1
-xdpyinfo > /dev/null 2>&1 || sleep 3
 
-# ===== SSL CERTIFICATE =====
-echo "🔐 Generate SSL..."
+if xdpyinfo > /dev/null 2>&1; then
+    log "✅ Display :1 OK"
+    xdpyinfo | grep -E "dimensions|depth" | head -5 | while read line; do
+        log "   $line"
+    done
+else
+    log "⚠️  Display belum siap, tunggu 5 detik..."
+    sleep 5
+    if xdpyinfo > /dev/null 2>&1; then
+        log "✅ Display OK setelah retry"
+    else
+        log "❌ Display gagal, lanjut saja..."
+    fi
+fi
+
+# ===== SSL CERT =====
+log_section "🔐 Generate SSL Certificate"
 openssl req \
     -new \
     -subj '/C=US/ST=State/L=City/O=Local/CN=localhost' \
@@ -288,39 +338,80 @@ openssl req \
     -nodes \
     -out /tmp/novnc.pem \
     -keyout /tmp/novnc.pem \
-    2>/dev/null
+    2>&1
+
+if [ -f /tmp/novnc.pem ]; then
+    log "✅ SSL cert OK: $(ls -lh /tmp/novnc.pem)"
+else
+    log "❌ SSL cert gagal dibuat!"
+    exit 1
+fi
 
 # ===== START noVNC =====
-echo "🌍 Starting noVNC on port $NOVNC_PORT..."
+log_section "🌍 Starting noVNC"
+log "Command: websockify --web=/usr/share/novnc/ $NOVNC_PORT localhost:$VNC_PORT"
+
+# Cek novnc web ada
+if [ -d /usr/share/novnc ]; then
+    log "✅ noVNC web dir OK: $(ls /usr/share/novnc/)"
+else
+    log "❌ /usr/share/novnc tidak ditemukan!"
+    exit 1
+fi
+
 websockify \
     --web=/usr/share/novnc/ \
     --cert=/tmp/novnc.pem \
     --min-backlog=32 \
     --daemon \
     $NOVNC_PORT \
-    localhost:$VNC_PORT \
-    2>/tmp/novnc.log
+    localhost:$VNC_PORT
 
-if [ $? -ne 0 ]; then
-    echo "❌ noVNC gagal! Log:"
-    cat /tmp/novnc.log
+NOVNC_EXIT=$?
+log "websockify exit code: $NOVNC_EXIT"
+
+if [ $NOVNC_EXIT -ne 0 ]; then
+    log "❌ noVNC GAGAL!"
+    log "--- noVNC Log ---"
+    cat /tmp/novnc.log 2>/dev/null || log "(tidak ada log)"
     exit 1
 fi
 
-echo "✅ noVNC OK"
-echo ""
-echo "================================================"
-echo "✅ SEMUA BERJALAN!"
-echo "================================================"
-echo "🌐 Buka: https://YOUR-APP.railway.app/vnc.html"
-echo "================================================"
+log "✅ noVNC berhasil start"
+sleep 2
+
+# ===== VERIFIKASI PORT LISTENING =====
+log_section "🔍 Verifikasi Port"
+sleep 2
+if netstat -tuln 2>/dev/null | grep -q ":$NOVNC_PORT "; then
+    log "✅ Port $NOVNC_PORT LISTENING"
+else
+    log "⚠️  Port $NOVNC_PORT belum listening, cek..."
+    netstat -tuln 2>/dev/null | head -20 || ss -tuln | head -20
+fi
+
+if netstat -tuln 2>/dev/null | grep -q ":$VNC_PORT "; then
+    log "✅ Port $VNC_PORT LISTENING"
+else
+    log "⚠️  Port $VNC_PORT belum listening"
+fi
+
+# ===== READY =====
+log_section "✅ SISTEM SIAP"
+log "🌐 Buka: https://YOUR-APP.railway.app/vnc.html"
+log "📍 noVNC : port $NOVNC_PORT"
+log "📍 VNC   : port $VNC_PORT"
 echo ""
 
-# ===== WATCHDOG LOOP =====
+# ===== WATCHDOG =====
+RESTART_COUNT=0
 while true; do
-    # Restart VNC jika crash
+    sleep 10
+
+    # Cek VNC
     if ! vncserver -list 2>/dev/null | grep -q ":1"; then
-        echo "⚠️  VNC crash! Restarting..."
+        RESTART_COUNT=$((RESTART_COUNT + 1))
+        log "⚠️  VNC crash! Restart #$RESTART_COUNT"
         rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
         vncserver :1 \
             -localhost no \
@@ -329,13 +420,13 @@ while true; do
             -depth 24 \
             -rfbport $VNC_PORT \
             --I-KNOW-THIS-IS-INSECURE \
-            2>/dev/null
+            2>&1 | while read l; do log "VNC: $l"; done
         sleep 3
     fi
 
-    # Restart noVNC jika crash
+    # Cek noVNC
     if ! pgrep -f "websockify" > /dev/null; then
-        echo "⚠️  noVNC crash! Restarting..."
+        log "⚠️  noVNC crash! Restarting..."
         websockify \
             --web=/usr/share/novnc/ \
             --cert=/tmp/novnc.pem \
@@ -343,10 +434,13 @@ while true; do
             --daemon \
             $NOVNC_PORT \
             localhost:$VNC_PORT \
-            2>/dev/null
+            2>&1 | while read l; do log "noVNC: $l"; done
     fi
 
-    sleep 10
+    # Log status setiap 60 detik
+    if [ $(($(date +%s) % 60)) -lt 10 ]; then
+        log "💓 Heartbeat - VNC: $(vncserver -list 2>/dev/null | grep ':1' || echo 'DOWN') | websockify: $(pgrep -f websockify > /dev/null && echo 'UP' || echo 'DOWN')"
+    fi
 done
 STARTSCRIPT
 
